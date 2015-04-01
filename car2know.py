@@ -127,10 +127,10 @@ def main(argv=None):
     parser = ArgumentParser(description='finds car2go near your location', formatter_class=RawDescriptionHelpFormatter)
     parser.add_argument("-a", "--latitude", dest="lat", metavar="LATITUDE",
                         help="Latitude of your location [default: %(default)s]", 
-                        default=47.6097, nargs="?")
+                        default=47.6097, nargs="?", type=float)
     parser.add_argument("-o", "--longitude", dest="long", metavar="LONGITUDE",
                         help="Longitude of your location [default: %(default)s]", 
-                        default=122.3331, nargs="?")
+                        default=122.3331, nargs="?", type=float)
     parser.add_argument("-c", "--city", dest="city", metavar="CITY",
                         help="City location you want to find cars in car2go [default: %(default)s]", 
                         default='seattle', nargs="?")
@@ -187,3 +187,4 @@ if __name__ == '__main__':
     init_logging()
 #     sys.argv.append('-k car2goweb')
     sys.exit(main())
+
