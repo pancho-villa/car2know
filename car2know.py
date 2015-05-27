@@ -8,7 +8,7 @@ from urllib.error import URLError
 import json
 import logging
 import math
-import signal
+import random
 import signal
 import sys
 import time
@@ -75,6 +75,14 @@ class Car:
         return self.name
 
 
+def retry(err_msg):
+    random_time = random.randint(10, 60)
+    time.sleep(random_time)
+    logger.error("Got {}, retrying".format(type(err_msg)))
+    return 'RETRY'
+
+
+
 def get_cars(location, key):
     """Fetches all cars in a given area"""
     url = "https://www.car2go.com/api/v2.1/vehicles?loc=" + location.lower() +\
@@ -85,11 +93,16 @@ def get_cars(location, key):
     req.add_header('User-Agent', hed)
     try:
         response = urllib.request.urlopen(req)
-    except (URLError, ConnectionResetError):
-        time.sleep(10)
-        return 'RETRY'
+    except URLError as ue:
+        logger.error(ue.reason)
+        return retry(ue)
+    except ConnectionResetError as cre:
+        logger.error(cre)
+        return retry(cre)
     if response.status != 200:
         logger.error(response.status)
+        logger.error("got {}".format(response.code))
+        return 'RETRY'
     return json.loads(response.read().decode("utf-8"))['placemarks']
 
 
@@ -124,15 +137,16 @@ def main(argv=None):
         argv = sys.argv
     else:
         sys.argv.extend(argv)
-    parser = ArgumentParser(description='finds car2go near your location', formatter_class=RawDescriptionHelpFormatter)
+    parser = ArgumentParser(description='finds car2go near your location',
+                            formatter_class=RawDescriptionHelpFormatter)
     parser.add_argument("-a", "--latitude", dest="lat", metavar="LATITUDE",
-                        help="Latitude of your location [default: %(default)s]", 
+                    help="Latitude of your location [default: %(default)s]",
                         default=47.6097, nargs="?", type=float)
     parser.add_argument("-o", "--longitude", dest="long", metavar="LONGITUDE",
-                        help="Longitude of your location [default: %(default)s]", 
+                    help="Longitude of your location [default: %(default)s]",
                         default=122.3331, nargs="?", type=float)
     parser.add_argument("-c", "--city", dest="city", metavar="CITY",
-                        help="City location you want to find cars in car2go [default: %(default)s]", 
+   help="City location you want to find cars in car2go [default: %(default)s]",
                         default='seattle', nargs="?")
     parser.add_argument("-k", "--key", dest="key", metavar="APIKEY",
                         help="officical API key from car2go.com")
@@ -175,7 +189,6 @@ def main(argv=None):
                          seen_count, len(known_cars), len(in_transit_cars)))
         for _, c in parked_cars.items():
             if c.d_from_home < 0.5 and c not in in_transit_cars.values():
-                logger.debug(c.d_from_home)
                 logger.info("{} {:.2f}km fuel: {}".format(c.name,
                                                           c.d_from_home,
                                                           c.fuel))
