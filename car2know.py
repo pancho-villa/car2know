@@ -4,7 +4,9 @@ Created on Feb 19, 2014
 @author: paco
 """
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
+from logging.handlers import RotatingFileHandler
 from urllib.error import URLError
+import http.client
 import json
 import logging
 import math
@@ -19,22 +21,27 @@ def sigint_handler(signal, frame):
     print('Keyboard Interrupt Caught! Exiting')
     sys.exit(0)
 
-# from pathlib import Path
 logger = logging.getLogger(__name__)
 signal.signal(signal.SIGINT, sigint_handler)
 
 
 def init_logging(level=logging.DEBUG):
-    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s ' + \
+    formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s ' +
                                   '-%(lineno)d - %(message)s')
 
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
 
     ch = logging.StreamHandler(sys.stdout)
+    rotating_handler = RotatingFileHandler('car2.log', maxBytes=20000000,
+                                           backupCount=5)
     ch.setLevel(logging.DEBUG)
     ch.setFormatter(formatter)
+    rotating_handler.setFormatter(formatter)
+    rotating_handler.setLevel(logging.DEBUG)
     logger.addHandler(ch)
+    logger.addHandler(rotating_handler)
+#     http.client.HTTPConnection.setdebuglevel=1
 
 
 def signal_handler(signal, frame):
@@ -58,8 +65,8 @@ class Car:
         self.fuel = fuel
         if coords != self.cur_location:
             movement = haversine(self.cur_location, coords)
-            #There can be some jitter in its location
-            #make sure it moves over 3 meters before making a new entry
+#            #There can be some jitter in its location
+#            #make sure it moves over 3 meters before making a new entry
             if movement > .03:
                 self.old_location = self.cur_location
                 self.cur_location = coords
@@ -82,13 +89,12 @@ def retry(err_msg):
     return 'RETRY'
 
 
-
 def get_cars(location, key):
     """Fetches all cars in a given area"""
     url = "https://www.car2go.com/api/v2.1/vehicles?loc=" + location.lower() +\
-    "&oauth_consumer_key=" + key + "site&format=json"
+          "&oauth_consumer_key=" + key + "site&format=json"
     hed = 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:36.0) Gecko/20100101' + \
-    ' Firefox/36.0'
+          ' Firefox/36.0'
     req = urllib.request.Request(url)
     req.add_header('User-Agent', hed)
     try:
@@ -100,10 +106,12 @@ def get_cars(location, key):
         logger.error(cre)
         return retry(cre)
     if response.status != 200:
-        logger.error(response.status)
-        logger.error("got {}".format(response.code))
-        return 'RETRY'
-    return json.loads(response.read().decode("utf-8"))['placemarks']
+        logger.error(response.code)
+        return retry(response.status)
+    logger.debug(response.status)
+    logger.debug(response.code)
+    payload = response.read().decode()
+    return json.loads(payload)['placemarks']
 
 
 def write_out(file_name, car_data):
@@ -124,47 +132,59 @@ def haversine(first, second):
     lon1, lat1, lon2, lat2 = map(math.radians, [lon1, lat1, lon2, lat2])
     dlon = lon2 - lon1
     dlat = lat2 - lat1
-    a = math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2
-                                                        ) * math.sin(dlon
-                                                                    / 2) ** 2
+    a = (math.sin(dlat / 2) ** 2 + math.cos(lat1) * math.cos(lat2) *
+         math.sin(dlon / 2) ** 2)
     c = 2 * math.asin(math.sqrt(a))
     km = 6367 * c
     return km
 
 
-def main(argv=None):
-    if argv is None:
-        argv = sys.argv
-    else:
+def parse_args(argv=None):
+    if argv:
         sys.argv.extend(argv)
+    else:
+        argv = sys.argv
     parser = ArgumentParser(description='finds car2go near your location',
                             formatter_class=RawDescriptionHelpFormatter)
     parser.add_argument("-a", "--latitude", dest="lat", metavar="LATITUDE",
-                    help="Latitude of your location [default: %(default)s]",
+                        help="Latitude of your location [default: %(default)s]",
                         default=47.6097, nargs="?", type=float)
     parser.add_argument("-o", "--longitude", dest="long", metavar="LONGITUDE",
-                    help="Longitude of your location [default: %(default)s]",
+                help="Longitude of your location [default: %(default)s]",
                         default=122.3331, nargs="?", type=float)
     parser.add_argument("-c", "--city", dest="city", metavar="CITY",
-   help="City location you want to find cars in car2go [default: %(default)s]",
+                        help="City location you want to find cars in car2go [default: %(default)s]",
                         default='seattle', nargs="?")
     parser.add_argument("-k", "--key", dest="key", metavar="APIKEY",
-                        help="officical API key from car2go.com")
-    args = parser.parse_args()
+                        help="officical API key from car2go.com", nargs="?")
+    return parser.parse_args()
+
+
+def main(args):
     lat = args.lat
     long = args.long
     k = args.key
     c = args.city
+    logger.debug("{} {} {} {}".format(lat, long, k, c))
+#     time.sleep(10)
     known_cars = {}
     in_transit_cars = {}
+    broken_iter = False
     while True:
         parked_cars = {}
         all_cars = 'RETRY'
         while all_cars == 'RETRY':
             all_cars = get_cars('seattle', k)
         for entry in all_cars:
-            name, location, fuel = entry['name'], entry['coordinates'], + \
-            entry['fuel']
+            try:
+                name, location, fuel = entry['name'], entry['coordinates'], + \
+                                       entry['fuel']
+            except KeyError as ke:
+                logger.error(ke)
+                return_type = type(entry)
+                logger.error("Received {} for entry".format(return_type))
+                broken_iter = True
+                break
             seen_count = len(all_cars)
             if name not in known_cars.keys():
                 known_cars[name] = Car(name, location, fuel, [long, lat])
@@ -179,25 +199,25 @@ def main(argv=None):
                     in_transit_cars.pop(car.name)
                 except KeyError:
                     pass
-        logger.debug("{} seen {} known".format(seen_count, len(known_cars)))
-        if seen_count < len(known_cars):
-            for car in known_cars.values():
-                if car not in parked_cars.values():
-                    in_transit_cars[car.name] = car
-            if seen_count + len(in_transit_cars) != len(known_cars):
-                logger.debug("{} seen {} known {} in transit".format(
-                         seen_count, len(known_cars), len(in_transit_cars)))
-        for _, c in parked_cars.items():
-            if c.d_from_home < 0.5 and c not in in_transit_cars.values():
-                logger.info("{} {:.2f}km fuel: {}".format(c.name,
-                                                          c.d_from_home,
-                                                          c.fuel))
+        if not broken_iter:
+            logger.debug("{} seen {} known".format(seen_count, len(known_cars)))
+            if seen_count < len(known_cars):
+                for car in known_cars.values():
+                    if car not in parked_cars.values():
+                        in_transit_cars[car.name] = car
+                if seen_count + len(in_transit_cars) != len(known_cars):
+                    logger.debug("{} seen {} known {} in transit".format(
+                             seen_count, len(known_cars), len(in_transit_cars)))
+            for _, c in parked_cars.items():
+                if c.d_from_home < 0.5 and c not in in_transit_cars.values():
+                    logger.info("{} {:.2f}km fuel: {}".format(c.name,
+                                                              c.d_from_home,
+                                                              c.fuel))
 
-        logger.info("NEW ENTRIES********************")
-        time.sleep(20)
+            logger.info("NEW ENTRIES********************")
+            time.sleep(20)
 
 if __name__ == '__main__':
     init_logging()
-#     sys.argv.append('-k car2goweb')
-    sys.exit(main())
+    sys.exit(main(parse_args()))
 
