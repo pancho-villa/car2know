@@ -16,12 +16,14 @@ import sys
 import time
 import urllib.request
 
+logger = logging.getLogger(__name__)
+
 
 def sigint_handler(signal, frame):
     print('Keyboard Interrupt Caught! Exiting')
     sys.exit(0)
 
-logger = logging.getLogger(__name__)
+
 signal.signal(signal.SIGINT, sigint_handler)
 
 
@@ -41,7 +43,7 @@ def init_logging(level=logging.DEBUG):
     rotating_handler.setLevel(logging.DEBUG)
     logger.addHandler(ch)
     logger.addHandler(rotating_handler)
-#     http.client.HTTPConnection.setdebuglevel=1
+    http.client.HTTPConnection.setdebuglevel=1
 
 
 def signal_handler(signal, frame):
@@ -82,32 +84,20 @@ class Car:
         return self.name
 
 
-def retry(err_msg):
-    random_time = random.randint(10, 60)
-    time.sleep(random_time)
-    logger.error("Got {}, retrying".format(type(err_msg)))
-    return 'RETRY'
-
-
 def get_cars(location, key):
     """Fetches all cars in a given area"""
     url = "https://www.car2go.com/api/v2.1/vehicles?loc=" + location.lower() +\
-          "&oauth_consumer_key=" + key + "site&format=json"
-    hed = 'Mozilla/5.0 (Windows NT 6.1; WOW64; rv:36.0) Gecko/20100101' + \
-          ' Firefox/36.0'
+          "&oauth_consumer_key=" + key + "&format=json"
+    logger.debug(url)
     req = urllib.request.Request(url)
-    req.add_header('User-Agent', hed)
     try:
         response = urllib.request.urlopen(req)
     except URLError as ue:
         logger.error(ue.reason)
-        return retry(ue)
-    except ConnectionResetError as cre:
-        logger.error(cre)
-        return retry(cre)
-    if response.status != 200:
-        logger.error(response.code)
-        return retry(response.status)
+    except urllib.error.HTTPError as he:
+        logger.error(he)
+        logger.error(he.code)
+        logger.error(he.reason)
     logger.debug(response.status)
     logger.debug(response.code)
     payload = response.read().decode()
@@ -147,16 +137,16 @@ def parse_args(argv=None):
     parser = ArgumentParser(description='finds car2go near your location',
                             formatter_class=RawDescriptionHelpFormatter)
     parser.add_argument("-a", "--latitude", dest="lat", metavar="LATITUDE",
-                        help="Latitude of your location [default: %(default)s]",
+                        help="Latitude of location [default: %(default)s]",
                         default=47.6097, nargs="?", type=float)
     parser.add_argument("-o", "--longitude", dest="long", metavar="LONGITUDE",
-                help="Longitude of your location [default: %(default)s]",
+                        help="Longitude of location [default: %(default)s]",
                         default=122.3331, nargs="?", type=float)
     parser.add_argument("-c", "--city", dest="city", metavar="CITY",
                         help="City location you want to find cars in car2go [default: %(default)s]",
                         default='seattle', nargs="?")
     parser.add_argument("-k", "--key", dest="key", metavar="APIKEY",
-                        help="officical API key from car2go.com", nargs="?")
+                        help="API key from car2go.com", nargs="?")
     return parser.parse_args()
 
 
